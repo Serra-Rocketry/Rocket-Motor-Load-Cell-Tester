@@ -74,7 +74,7 @@ void setup() {
   // Accurate time is necessary for certificate validation and writing in batches
   // For the fastest time sync find NTP servers in your area: https://www.pool.ntp.org/zone/
   // Syncing progress and the time will be printed to Serial.
-  timeSync(tz_info, "pool.ntp.org", "time.nis.gov");
+  timeSync(tz_info, "a.st1.ntp.br", "b.st1.ntp.br");
 
   // InfluxDB client instance with preconfigured InfluxCloud certificate
   InfluxDBClient client(influxdb_url, influxdb_org, influxdb_bucket, influxdb_token, InfluxDbCloud2CACert);
