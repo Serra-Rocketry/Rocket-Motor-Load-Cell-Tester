@@ -29,17 +29,17 @@ void setup() {
     return;
   }
 
-  // Read the Wi-Fi credentials and InfluxDB parameters from the data.json file
-  File configFile = SPIFFS.open("/data.json", "r");
+  // Read the Wi-Fi credentials and InfluxDB parameters from the credentials.json file
+  File configFile = SPIFFS.open("/credentials.json", "r");
   if (!configFile) {
-    Serial.println("Failed to open data.json file");
+    Serial.println("Failed to open credentials.json file");
     return;
   }
 
   StaticJsonDocument<256> config;
   DeserializationError error = deserializeJson(config, configFile);
   if (error) {
-    Serial.print("Failed to parse data.json file: ");
+    Serial.print("Failed to parse credentials.json file: ");
     Serial.println(error.c_str());
     return;
   }
