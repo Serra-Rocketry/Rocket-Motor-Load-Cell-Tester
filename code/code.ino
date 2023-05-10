@@ -1,85 +1,69 @@
-#include <FS.h>
+#if defined(ESP32)
 #include <WiFiMulti.h>
-#include <ESP8266WiFi.h>
+WiFiMulti wifiMulti;
+#define DEVICE "ESP32"
+#elif defined(ESP8266)
 #include <ESP8266WiFiMulti.h>
+ESP8266WiFiMulti wifiMulti;
+#define DEVICE "ESP8266"
+#endif
+
 #include <InfluxDbClient.h>
-#include <InfluxDbCloud.h>
-#include <ArduinoJson.h>
-#include "DHT.h"
 
-#define DHTPIN 4     // Digital pin connected to the DHT sensor
-#define DHTTYPE DHT11   // DHT 11
+// WiFi AP SSID
+#define WIFI_SSID "Raspberry-AP"
+// WiFi password
+#define WIFI_PASSWORD "raspberry"
+// InfluxDB  server url. Don't use localhost, always server name or ip address.
+// E.g. http://192.168.1.48:8086 (In InfluxDB 2 UI -> Load Data -> Client Libraries), 
+#define INFLUXDB_URL "http://192.168.1.108:8086/"
+// InfluxDB 2 server or cloud API authentication token (Use: InfluxDB UI -> Load Data -> Tokens -> <select token>)
+#define INFLUXDB_TOKEN "oDwDIOL9HpwKM16Jl7iZ2ijLGoROkwpe5qMpRBY155eULgs8dQdU8nlZdRVaLDc-nkDWkW_TinftyvoNmOVjWA=="
+// InfluxDB 2 organization id (Use: InfluxDB UI -> Settings -> Profile -> <name under tile> )
+#define INFLUXDB_ORG "UERJ"
+// InfluxDB 2 bucket name (Use: InfluxDB UI -> Load Data -> Buckets)
+#define INFLUXDB_BUCKET "rocket"
+// InfluxDB v1 database name 
+//#define INFLUXDB_DB_NAME "database"
 
-// Create your Data Point here
-Point sensor("climate");
+// InfluxDB client instance
+InfluxDBClient client(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKEN);
+// InfluxDB client instance for InfluxDB 1
+//InfluxDBClient client(INFLUXDB_URL, INFLUXDB_DB_NAME);
 
-// Set up the DHT connection
-DHT dht(DHTPIN, DHTTYPE);
+// Data point
+Point sensor("StaticTester");
+
+#include "HX711.h"
+
+#define CELULA_DT  26
+#define CELULA_SCK  27
+
+HX711 escala;
+
+float fator_calib = 473893; // Coloque aqui o valor encontrado na calibração
 
 void setup() {
-  // Start Serial for monitoring
+  // Start the serial communication
   Serial.begin(115200);
 
-  // Init the DHT sensor
-  dht.begin();
-
-  // Mount the file system
-  if (!SPIFFS.begin()) {
-    Serial.println("Failed to mount file system");
-    return;
-  }
-
-  // Read the Wi-Fi credentials and InfluxDB parameters from the credentials.json file
-  File configFile = SPIFFS.open("/credentials.json", "r");
-  if (!configFile) {
-    Serial.println("Failed to open credentials.json file");
-    return;
-  }
-
-  StaticJsonDocument<256> config;
-  DeserializationError error = deserializeJson(config, configFile);
-  if (error) {
-    Serial.print("Failed to parse credentials.json file: ");
-    Serial.println(error.c_str());
-    return;
-  }
-
-  const char* wifi_ssid = config["wifi_ssid"];
-  const char* wifi_password = config["wifi_password"];
-  const char* influxdb_url = config["influxdb_url"];
-  const char* influxdb_token = config["influxdb_token"];
-  const char* influxdb_org = config["influxdb_org"];
-  const char* influxdb_bucket = config["influxdb_bucket"];
-  const char* tz_info = config["tz_info"];
-
-  // Setup wifi
+  // Connect to WiFi
+  Serial.println("Connecting to WiFi...");
   WiFi.mode(WIFI_STA);
-  WiFi.begin(wifi_ssid, wifi_password);
-
-  Serial.print("Connecting to wifi");
-  while (WiFi.status() != WL_CONNECTED) {
+  wifiMulti.addAP(WIFI_SSID, WIFI_PASSWORD);
+  while (wifiMulti.run() != WL_CONNECTED) {
     Serial.print(".");
-    delay(100);
+    delay(500);
   }
-  Serial.println();
+  Serial.println("Connected to WiFi!");
 
-  // Add tags. Here we will track which device our data is coming from
-  #if defined(ESP32)
-  Point sensor("climate", DEVICE);
-  #elif defined(ESP8266)
-  Point sensor("climate");
-  sensor.addTag("device", DEVICE);
-  #endif
+  // Set up the InfluxDB client
+  client.setConnectionParams(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKEN);
 
-  // Accurate time is necessary for certificate validation and writing in batches
-  // For the fastest time sync find NTP servers in your area: https://www.pool.ntp.org/zone/
-  // Syncing progress and the time will be printed to Serial.
-  timeSync(tz_info, "a.st1.ntp.br", "b.st1.ntp.br");
+  // Add tags to the data point
+  sensor.addTag("Version", "V0.1");
 
-  // InfluxDB client instance with preconfigured InfluxCloud certificate
-  InfluxDBClient client(influxdb_url, influxdb_org, influxdb_bucket, influxdb_token, InfluxDbCloud2CACert);
-
-  // Check server connection
+  // Check if the connection to the InfluxDB server is valid
   if (client.validateConnection()) {
     Serial.print("Connected to InfluxDB: ");
     Serial.println(client.getServerUrl());
@@ -87,37 +71,39 @@ void setup() {
     Serial.print("InfluxDB connection failed: ");
     Serial.println(client.getLastErrorMessage());
   }
-}
 
+  // Set up the HX711 load cell amplifier
+  escala.begin(CELULA_DT, CELULA_SCK);
+  escala.set_scale(fator_calib);
+  escala.tare();
+}
 
 void loop() {
-  // Clear fields for reusing the point. Tags will remain untouched
+  // Clear fields of the sensor data point
   sensor.clearFields();
-
-  // Read the temperature and humidity from the sensor, and add them to your data point, along with a calculated heat index
-  float h = dht.readHumidity();
-  float t = dht.readTemperature();
-
-  sensor.addField("humidity", h);
-  sensor.addField("temperature", t);
-  sensor.addField("heat_index", dht.computeHeatIndex(t, h, false));
-
-  // Print what are we exactly writing
+  
+  // Add the load cell weight 
+  // sensor.addField("loadCell", escala.get_units(1),3);
+  
+  // Add a sine wave as a reference field to the sensor data point
+  float referenceValue = sin(6.28*(millis()/30));
+  sensor.addField("reference", referenceValue, 3);
+  
+  // Print the line protocol for the sensor data point
   Serial.print("Writing: ");
-  Serial.println(sensor.toLineProtocol());
-
-  // If no Wifi signal, try to reconnect it
-  if ((WiFi.RSSI() == 0) && (wifiMulti.run() != WL_CONNECTED)) {
-    Serial.println("Wifi connection lost");
+  Serial.println(client.pointToLineProtocol(sensor));
+  
+  // If the WiFi connection is lost, try to reconnect it
+  if (wifiMulti.run() != WL_CONNECTED) {
+    Serial.println("WiFi connection lost");
   }
-
-  // Write point
-  if (!client.writePoint(sensor)) {
-    Serial.print("InfluxDB write failed: ");
+  
+  // Write the sensor data point to the InfluxDB server
+  if (client.writePoint(sensor)) {
+    Serial.println("Data point written successfully");
+  } else {
+    Serial.print("Failed to write data point: ");
     Serial.println(client.getLastErrorMessage());
   }
-
-  //Wait 10s
-  Serial.println("Wait 10s");
-  delay(10000);
 }
+
