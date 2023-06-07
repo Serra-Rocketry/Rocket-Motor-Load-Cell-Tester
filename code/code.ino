@@ -71,7 +71,9 @@ void setup() {
     Serial.print("InfluxDB connection failed: ");
     Serial.println(client.getLastErrorMessage());
   }
-
+  client.setWriteOptions(WriteOptions().writePrecision(WritePrecision::MS));
+  configTzTime("America/Sao_Paulo", "a.st1.ntp.br", "b.st1.ntp.br");
+  client.setWriteOptions(WriteOptions().batchSize(60));
   // Set up the HX711 load cell amplifier
   escala.begin(CELULA_DT, CELULA_SCK);
   escala.set_scale(fator_calib);
@@ -106,4 +108,3 @@ void loop() {
     Serial.println(client.getLastErrorMessage());
   }
 }
-
