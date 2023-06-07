@@ -43,10 +43,35 @@ HX711 escala;
 
 float fator_calib = 473893; // Coloque aqui o valor encontrado na calibração
 
+void setupInfluxDB(){
+  // Set up the InfluxDB client
+  client.setConnectionParams(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKEN);
+  configTzTime("America/Sao_Paulo", "a.st1.ntp.br", "b.st1.ntp.br");
+  // Add tags to the data point
+  sensor.addTag("Version", "V0.1");
+  // Check if the connection to the InfluxDB server is valid
+  if (client.validateConnection()) {
+    Serial.print("Connected to InfluxDB: ");
+    Serial.println(client.getServerUrl());
+  } else {
+    Serial.print("InfluxDB connection failed: ");
+    Serial.println(client.getLastErrorMessage());
+  }
+  // Set the write options for the data point
+  client.setWriteOptions(WriteOptions().writePrecision(WritePrecision::MS));
+  // Set the batch size of the write options
+  client.setWriteOptions(WriteOptions().batchSize(60));
+};
+
+void setupLoadCell(){
+  escala.begin(CELULA_DT, CELULA_SCK);
+  escala.set_scale(fator_calib);
+  escala.tare();
+}
+
 void setup() {
   // Start the serial communication
   Serial.begin(115200);
-
   // Connect to WiFi
   Serial.println("Connecting to WiFi...");
   WiFi.mode(WIFI_STA);
@@ -56,50 +81,25 @@ void setup() {
     delay(500);
   }
   Serial.println("Connected to WiFi!");
-
-  // Set up the InfluxDB client
-  client.setConnectionParams(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKEN);
-
-  // Add tags to the data point
-  sensor.addTag("Version", "V0.1");
-
-  // Check if the connection to the InfluxDB server is valid
-  if (client.validateConnection()) {
-    Serial.print("Connected to InfluxDB: ");
-    Serial.println(client.getServerUrl());
-  } else {
-    Serial.print("InfluxDB connection failed: ");
-    Serial.println(client.getLastErrorMessage());
-  }
-  client.setWriteOptions(WriteOptions().writePrecision(WritePrecision::MS));
-  configTzTime("America/Sao_Paulo", "a.st1.ntp.br", "b.st1.ntp.br");
-  client.setWriteOptions(WriteOptions().batchSize(60));
-  // Set up the HX711 load cell amplifier
-  escala.begin(CELULA_DT, CELULA_SCK);
-  escala.set_scale(fator_calib);
-  escala.tare();
+  setupInfluxDB();
+  setupLoadCell();
 }
 
-void loop() {
+void dataWriteInfluxDB(){
   // Clear fields of the sensor data point
   sensor.clearFields();
-  
   // Add the load cell weight 
   // sensor.addField("loadCell", escala.get_units(1),3);
-  
   // Add a sine wave as a reference field to the sensor data point
   float referenceValue = sin(6.28*(millis()/30));
   sensor.addField("reference", referenceValue, 3);
-  
   // Print the line protocol for the sensor data point
   Serial.print("Writing: ");
   Serial.println(client.pointToLineProtocol(sensor));
-  
   // If the WiFi connection is lost, try to reconnect it
   if (wifiMulti.run() != WL_CONNECTED) {
     Serial.println("WiFi connection lost");
   }
-  
   // Write the sensor data point to the InfluxDB server
   if (client.writePoint(sensor)) {
     Serial.println("Data point written successfully");
@@ -107,4 +107,8 @@ void loop() {
     Serial.print("Failed to write data point: ");
     Serial.println(client.getLastErrorMessage());
   }
+}
+
+void loop() {
+  dataWriteInfluxDB();
 }
