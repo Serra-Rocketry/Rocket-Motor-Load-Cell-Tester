@@ -110,6 +110,13 @@ void setup() {
     Serial.print(".");
     delay(500);
   }
+
+  #if defined(ESP32)
+    WiFi.setTxPower(WIFI_POWER_19_5dBm);    // Set WiFi RF power output to highest level
+  #elif defined(ESP8266)
+    WiFi.setOutputPower(20.5); // Set WiFi RF power output to highest level
+  #endif
+
   Serial.println("Connected to WiFi!");
   setupInfluxDB();
   setupLoadCell();
